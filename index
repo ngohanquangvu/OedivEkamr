@@ -1,0 +1,192 @@
+# Kiểm tra ffmpeg
+def is_ffmpeg_available(ffmpeg_bin):
+    return shutil.which(os.path.join(ffmpeg_bin, 'ffmpeg')) is not None
+
+# Hàm trích xuất khung hình và âm thanh
+def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_bin):
+    def run():
+        try:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+
+            # Lấy thông tin video
+            probe = ffmpeg.probe(video_path, cmd=os.path.join(ffmpeg_bin, 'ffprobe'))
+            duration = float(probe['format']['duration'])  # Thời lượng video
+
+            # Tính tổng số khung hình dự kiến
+            total_frames = int(duration // interval)
+
+            # Sử dụng FFmpeg để trích xuất khung hình
+            output_path = os.path.join(output_dir, 'frame_%04d.png')
+            command = [
+                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                '-i', video_path,
+                '-vf', f'fps=1/{interval}',
+                output_path
+            ]
+
+            # Sử dụng FfmpegProgress để theo dõi tiến trình
+            ff = FfmpegProgress(command)
+            for progress in ff.run_command_with_progress():
+                progress_callback(progress / 100)  # Cập nhật tiến trình đến 50%
+
+            # Trích xuất âm thanh từ video gốc
+            audio_path = os.path.join(output_dir, "audio.wav")
+            ffmpeg.input(video_path).output(audio_path, vn=None).run(overwrite_output=True, cmd=os.path.join(ffmpeg_bin, 'ffmpeg'))
+
+            return duration
+        except Exception as e:
+            messagebox.showerror("Error", f"Lỗi khi trích xuất khung hình và âm thanh: {e}")
+            return None
+    t = threading.Thread(target=run)
+    t.start()
+
+# Hàm tạo video mới từ các khung hình và giữ âm thanh gốc
+def create_video_from_frames(frame_dir, interval, output_video, video_path, ffmpeg_bin, progress_callback):
+    def run():
+        try:
+            # Tạo video mới từ các khung hình
+            input_pattern = os.path.join(frame_dir, 'frame_%04d.png')
+            audio_path = os.path.join(frame_dir, 'audio.wav')
+            original_duration = ffmpeg.probe(video_path, cmd=os.path.join(ffmpeg_bin, 'ffprobe'))['format']['duration']
+
+            # Tạo video mới từ khung hình và ghép âm thanh vào video mới
+            command = [
+                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                '-y',
+                '-framerate', str(1 / interval),
+                '-i', input_pattern,
+                '-i', audio_path,
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-t', str(original_duration),
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-strict', 'experimental',
+                output_video
+            ]
+
+            # Sử dụng FfmpegProgress để theo dõi tiến trình
+            ff = FfmpegProgress(command)
+            for progress in ff.run_command_with_progress():
+                print(progress)
+                progress_callback(progress / 100)  # Cập nhật tiến trình từ 50% đến 100%
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Lỗi khi tạo video: {e}")
+    t = threading.Thread(target=run)
+    t.start()
+
+# Hàm cập nhật tiến trình
+def update_progress(value):
+    progress_bar.set(value)
+    progress_label.configure(text=f"{int(value * 100)}%")
+def update_progress_combine(value):
+    progress_bar_combine.set(value)
+    progress_label_combine.configure(text=f"{int(value * 100)}%")
+
+# Hàm chọn đường dẫn ffmpeg
+def choose_ffmpeg_path():
+    global ffmpeg_bin_path
+    path = filedialog.askdirectory(title="Chọn đường dẫn đến ffmpeg/bin")
+    if path:
+        ffmpeg_bin_path = path
+        ffmpeg_path_entry.delete(0, ctk.END)
+        ffmpeg_path_entry.insert(0, path)
+        if not os.path.exists(os.path.join(ffmpeg_bin_path, 'ffmpeg.exe')):
+            messagebox.showerror("Error", "Đường dẫn FFmpeg không hợp lệ!")
+        else:
+            messagebox.showinfo("Success", "Đường dẫn FFmpeg đã được cập nhật.")
+
+# Hàm chọn file video
+def choose_file(entry_widget):
+    file_path = filedialog.askopenfilename(filetypes=[("MP4 files", "*.mp4")])
+    if file_path:
+        entry_widget.delete(0, ctk.END)
+        entry_widget.insert(0, file_path)
+
+# Hàm chọn thư mục
+def choose_folder(entry_widget):
+    folder_path = filedialog.askdirectory()
+    if folder_path:
+        entry_widget.delete(0, ctk.END)
+        entry_widget.insert(0, folder_path)
+
+# Giao diện CustomTkinter với hai tab
+app = ctk.CTk()
+app.title("Quản lý Video với FFmpeg")
+app.geometry("600x500")
+
+# Biến lưu đường dẫn ffmpeg
+ffmpeg_bin_path = "./ffmpeg/bin"
+
+# Nhập đường dẫn FFmpeg chung
+ctk.CTkLabel(app, text="Đường dẫn FFmpeg").pack(pady=5)
+ffmpeg_path_frame = ctk.CTkFrame(app)
+ffmpeg_path_frame.pack(pady=5, padx=10, fill="x")
+
+ffmpeg_path_entry = ctk.CTkEntry(ffmpeg_path_frame, placeholder_text="Nhập đường dẫn ffmpeg/bin", width=450)
+ffmpeg_path_entry.pack(side="left", padx=5, pady=5)
+ffmpeg_path_button = ctk.CTkButton(ffmpeg_path_frame, text="Chọn", command=choose_ffmpeg_path)
+ffmpeg_path_button.pack(side="left", padx=5)
+
+# Tạo tab view
+tab_view = ctk.CTkTabview(app, width=500, height=400)
+tab_view.pack(pady=10, padx=10, fill="both", expand=True)
+
+# Tab 1: Tách ảnh và âm thanh
+tab_extract = tab_view.add("Tách ảnh & Âm thanh")
+
+ctk.CTkLabel(tab_extract, text="Chọn video MP4").pack(pady=10)
+video_path_entry = ctk.CTkEntry(tab_extract, placeholder_text="Đường dẫn video", width=400)
+video_path_entry.pack(pady=5)
+video_button = ctk.CTkButton(tab_extract, text="Chọn Video", command=lambda: choose_file(video_path_entry))
+video_button.pack(pady=5)
+
+interval_entry = ctk.CTkEntry(tab_extract, placeholder_text="Khoảng thời gian (giây)", width=200)
+interval_entry.pack(pady=5)
+
+output_extract_button = ctk.CTkButton(tab_extract, text="Chạy Tách", command=lambda: extract_frames(
+    video_path_entry.get(), float(interval_entry.get()), "frames", update_progress, ffmpeg_bin_path
+))
+output_extract_button.pack(pady=20)
+
+# Thanh tiến trình cho tab 1
+ctk.CTkLabel(tab_extract, text="Tiến trình").pack(pady=10)
+progress_bar = ctk.CTkProgressBar(tab_extract, width=400)
+progress_bar.pack(pady=5)
+progress_bar.set(0)
+
+progress_label = ctk.CTkLabel(tab_extract, text="0%")
+progress_label.pack()
+
+# Tab 2: Ghép ảnh và âm thanh
+tab_combine = tab_view.add("Ghép ảnh & Âm Thanh")
+
+frames_dir_entry = ctk.CTkEntry(tab_combine, placeholder_text="Thư mục ảnh", width=400)
+frames_dir_entry.pack(pady=5)
+frames_button = ctk.CTkButton(tab_combine, text="Chọn Thư Mục", command=lambda: choose_folder(frames_dir_entry))
+frames_button.pack(pady=5)
+
+audio_file_entry = ctk.CTkEntry(tab_combine, placeholder_text="Đường dẫn file video", width=400)
+audio_file_entry.pack(pady=5)
+audio_button = ctk.CTkButton(tab_combine, text="Chọn File", command=lambda: choose_file(audio_file_entry))
+audio_button.pack(pady=5)
+interval_entry_combine = ctk.CTkEntry(tab_combine, placeholder_text="Khoảng thời gian (giây)", width=200)
+interval_entry_combine.pack(pady=5)
+
+output_combine_button = ctk.CTkButton(tab_combine, text="Chạy Ghép", command=lambda: create_video_from_frames(
+    frames_dir_entry.get(), int(interval_entry_combine.get()), "output_combined.mp4", audio_file_entry.get(), ffmpeg_bin_path, update_progress_combine
+))
+output_combine_button.pack(pady=20)
+
+# Thanh tiến trình cho tab 2
+ctk.CTkLabel(tab_combine, text="Tiến trình").pack(pady=10)
+progress_bar_combine = ctk.CTkProgressBar(tab_combine, width=400)
+progress_bar_combine.pack(pady=5)
+progress_bar_combine.set(0)
+
+progress_label_combine = ctk.CTkLabel(tab_combine, text="0%")
+progress_label_combine.pack()
+
+app.mainloop()
