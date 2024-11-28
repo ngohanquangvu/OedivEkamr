@@ -63,7 +63,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
         # Tạo video tạm thời cho từng cặp ảnh và hiệu ứng chuyển cảnh giữa chúng
         for i in range(len(images) - 1):
             temp_video = os.path.join(frame_dir, f"temp_{i}.mp4")
-            effect = random.choice(transitions)
+            effect = transitions[sum(ord(c) for c in str(id(transitions))) % len(transitions)]
 
             # Lệnh để tạo video tạm thời cho từng cặp ảnh với hiệu ứng chuyển cảnh
             command = [
