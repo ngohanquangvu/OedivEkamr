@@ -24,34 +24,33 @@ def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_b
             video_key = hash_video_name(os.path.basename(video_path))
             output_directory = os.path.join(output_dir, os.path.basename(video_path).split('.')[0])
             os.makedirs(output_directory, exist_ok=True)
+
             # Sử dụng FFmpeg để trích xuất khung hình
-            output_path = os.path.join(output_directory, 'frame_%04d.png')
-            command = [
+            output_path = os.path.join(output_directory, 'frame_%d.png')
+            command_extract_frames = [
                 os.path.join(ffmpeg_bin, 'ffmpeg'),
                 '-i', video_path,
                 '-vf', f'fps=1/{interval}',
                 output_path
             ]
-            # Sử dụng FfmpegProgress để theo dõi tiến trình
-            creation_flags = subprocess.CREATE_NO_WINDOW
-            ff = FfmpegProgress(command)
-            with subprocess.Popen(command, creationflags=creation_flags, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
-                for progress in ff.run_command_with_progress(process):
-                            progress_callback(video_key,progress / 100)  # Cập nhật tiến trình đến 50%
+            subprocess.Popen(command_extract_frames, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # Trích xuất âm thanh từ video gốc
             audio_path = os.path.join(output_directory, "audio.wav")
             command_audio = [
                 os.path.join(ffmpeg_bin, 'ffmpeg'),
-                '-i', video_path,
+                '-i', video_path,  # Đầu vào là video
                 '-vn',  # Không lấy video, chỉ lấy âm thanh
-                audio_path
+                '-acodec', 'pcm_s16le',  # Chỉ định codec âm thanh (PCM 16-bit Little Endian)
+                '-ar', '44100',  # Tần số lấy mẫu 44.1 kHz (chuẩn CD)
+                '-ac', '2',  # Số kênh âm thanh (stereo)
+                audio_path  # Đường dẫn đầu ra file âm thanh
             ]
 
             # Thực thi lệnh ffmpeg với subprocess và ẩn cửa sổ CMD
             subprocess.Popen(command_audio, creationflags=subprocess.CREATE_NO_WINDOW)        
         except Exception as e:
-            messagebox.showerror("Error", f"Lỗi khi trích xuất khung hình và âm thanh: {e}")
+            open("log.txt", "a").write(f"Lỗi khi trích xuất khung hình và âm thanh: {e}\n")
             return None
     def task():
         subfolders = [f.path for f in os.scandir(video_path) if f.is_file() and f.path.endswith('.mp4')]
