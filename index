@@ -1,4 +1,3 @@
-ctypes.windll.kernel32.SetConsoleMode(ctypes.windll.kernel32.GetStdHandle(-11), 0x0001)
 video_progress = {}
 extract_progress = {}
 # Kiểm tra ffmpeg
@@ -34,9 +33,11 @@ def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_b
                 output_path
             ]
             # Sử dụng FfmpegProgress để theo dõi tiến trình
-            ff = FfmpegProgress(command) 
-            for progress in ff.run_command_with_progress():
-                progress_callback(video_key,progress / 100)  # Cập nhật tiến trình đến 50%
+            creation_flags = subprocess.CREATE_NO_WINDOW
+            ff = FfmpegProgress(command)
+            with subprocess.Popen(command, creationflags=creation_flags, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                for progress in ff.run_command_with_progress(process):
+                            progress_callback(video_key,progress / 100)  # Cập nhật tiến trình đến 50%
 
             # Trích xuất âm thanh từ video gốc
             audio_path = os.path.join(output_directory, "audio.wav")
