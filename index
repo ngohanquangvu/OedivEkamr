@@ -1,3 +1,4 @@
+ctypes.windll.kernel32.SetConsoleMode(ctypes.windll.kernel32.GetStdHandle(-11), 0x0001)
 video_progress = {}
 extract_progress = {}
 # Kiểm tra ffmpeg
