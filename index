@@ -40,7 +40,15 @@ def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_b
 
             # Trích xuất âm thanh từ video gốc
             audio_path = os.path.join(output_directory, "audio.wav")
-            ffmpeg.input(video_path).output(audio_path, vn=None).run(overwrite_output=True, cmd=os.path.join(ffmpeg_bin, 'ffmpeg'))
+            command_audio = [
+                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                '-i', video_path,
+                '-vn',  # Không lấy video, chỉ lấy âm thanh
+                audio_path
+            ]
+
+            # Thực thi lệnh ffmpeg với subprocess và ẩn cửa sổ CMD
+            subprocess.Popen(command_audio, creationflags=subprocess.CREATE_NO_WINDOW)        
         except Exception as e:
             messagebox.showerror("Error", f"Lỗi khi trích xuất khung hình và âm thanh: {e}")
             return None
