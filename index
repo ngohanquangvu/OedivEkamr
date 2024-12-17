@@ -33,8 +33,8 @@ def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_b
                 '-vf', f'fps=1/{interval}',
                 output_path
             ]
-            subprocess.Popen(command_extract_frames, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
+            extract_fr = subprocess.Popen(command_extract_frames, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            extract_fr.communicate()
             # Trích xuất âm thanh từ video gốc
             audio_path = os.path.join(output_directory, "audio.wav")
             command_audio = [
@@ -48,7 +48,9 @@ def extract_frames(video_path, interval, output_dir, progress_callback, ffmpeg_b
             ]
 
             # Thực thi lệnh ffmpeg với subprocess và ẩn cửa sổ CMD
-            subprocess.Popen(command_audio, creationflags=subprocess.CREATE_NO_WINDOW)        
+            extract_wav = subprocess.Popen(command_audio, creationflags=subprocess.CREATE_NO_WINDOW)   
+            extract_wav.communicate()
+            messagebox.showinfo("Success", "Trích xuất khung hình và âm thanh thành công.")     
         except Exception as e:
             open("log.txt", "a").write(f"Lỗi khi trích xuất khung hình và âm thanh: {e}\n")
             return None
@@ -78,13 +80,18 @@ def create_video_from_frames(frame_dir, interval, output_video, luong, ffmpeg_bi
 
             if len(images) < 2:
                 raise Exception("Cần ít nhất 2 ảnh để tạo video.")
-
-            temp_videos = []
             
+            last_effect = None
+            temp_videos = []
+
             # Tạo video tạm thời cho từng cặp ảnh và hiệu ứng chuyển cảnh giữa chúng
             for i in range(len(images) - 1):
                 temp_video = os.path.join(frame_dir, f"temp_{i}.mp4")
-                effect = transitions[sum(ord(c) for c in str(id(transitions))) % len(transitions)]
+                
+                # Chọn hiệu ứng không trùng với hiệu ứng trước đó
+                effect = transitions[int(time.time()) % len(transitions)]
+
+                filter_complex = f"[0:v][1:v]xfade=transition={effect}:duration=1.0:offset=0[v]"
 
                 # Lệnh để tạo video tạm thời cho từng cặp ảnh với hiệu ứng chuyển cảnh
                 command = [
@@ -92,17 +99,41 @@ def create_video_from_frames(frame_dir, interval, output_video, luong, ffmpeg_bi
                     '-y',
                     '-loop', '1', '-t', str(interval), '-i', images[i],
                     '-loop', '1', '-t', str(interval), '-i', images[i + 1],
-                    '-filter_complex', f"[0:v][1:v]xfade=transition={effect}:duration=1.0:offset=0[v]",
+                    '-filter_complex', filter_complex,
                     '-map', '[v]',
                     '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
                     temp_video
                 ]
 
-                ff = FfmpegProgress(command)
-                for progress in ff.run_command_with_progress():
-                    progress_callback(video_key, progress / len(images))
+                subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
 
                 temp_videos.append(temp_video)
+
+            # Tính toán thời gian còn lại của audio
+            audio_duration_command = [
+                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                '-i', audio_path,
+                '-hide_banner',
+                '-f', 'null', '-'
+            ]
+            result = subprocess.Popen(audio_duration_command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stderr = result.stderr.read()
+            audio_duration = float([x for x in stderr.split('\n') if "Duration" in x][0].split()[1].replace(',', '').split(':')[2])
+
+            # Tính toán thời gian còn lại cho khung hình cuối cùng
+            remaining_duration = audio_duration - (interval * (len(images) - 1))
+
+            # Thêm khung hình cuối cùng với thời gian còn dư
+            final_frame = os.path.join(frame_dir, "final_frame.mp4")
+            command_final_frame = [
+                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                '-y',
+                '-loop', '1', '-t', str(remaining_duration), '-i', images[-1],
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                final_frame
+            ]
+            subprocess.Popen(command_final_frame, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            temp_videos.append(final_frame)
 
             # Kiểm tra file tạm thời và tạo concat_list.txt
             concat_list_file = os.path.join(frame_dir, "concat_list.txt")
@@ -120,9 +151,8 @@ def create_video_from_frames(frame_dir, interval, output_video, luong, ffmpeg_bi
                 result_video
             ]
 
-            ff = FfmpegProgress(final_command)
-            for progress in ff.run_command_with_progress():
-                progress_callback(video_key, progress / 100)
+            subprocess.Popen(final_command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            messagebox.showinfo("Success", "Tạo video thành công.")
         except Exception as e:
             tb = e.__traceback__
             error_message = f"Exception: {e} | "
