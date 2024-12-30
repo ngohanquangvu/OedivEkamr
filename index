@@ -109,7 +109,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
                 temp_video
             ]
 
-            subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
 
             temp_videos.append(temp_video)
 
@@ -129,7 +129,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
             output_video
         ]
 
-        subprocess.Popen(final_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        subprocess.Popen(final_command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
     except Exception as e:
         tb = e.__traceback__
         error_message = f"Exception: {e} | "
