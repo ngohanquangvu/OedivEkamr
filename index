@@ -98,7 +98,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
                 filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),1080-t*180,180)'[v]")
 
             command = [
-                os.path.join(ffmpeg_bin, 'ffmpeg'),
+                os.path.join(ffmpeg_bin, 'ffmpeg.exe'),
                 '-y',
                 '-loop', '1',
                 '-t', str(interval),
@@ -121,7 +121,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
 
         # Lệnh FFmpeg để ghép nối video cuối cùng
         final_command = [
-            os.path.join(ffmpeg_bin, 'ffmpeg'),
+            os.path.join(ffmpeg_bin, 'ffmpeg.exe'),
             '-y',
             '-f', 'concat', '-safe', '0', '-i', concat_list_file,
             '-i', audio_path,
