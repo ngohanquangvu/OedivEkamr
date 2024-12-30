@@ -83,7 +83,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
         
         for i, image in enumerate(images):
             temp_video = os.path.join(frame_dir, f"temp_{i}.mp4")
-            animation = animations[time.time() % len(animations)]
+            animation = animations[int(int(time.time()) % len(animations))]
             
             filter_complex = []
             filter_complex = [
