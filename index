@@ -45,10 +45,73 @@ def process_video(video_path, interval, ffmpeg_bin):
     except Exception as e:
         messagebox.showerror("Error", f"Lỗi khi xử lý video: {e}")
 
+def cubic_ease(t, ease_type='in-out'):
+    t = np.clip(t, 0.0, 1.0)
+
+    if ease_type == 'in':
+        # Quintic ease-in
+        return t * t * t * t * t
+    elif ease_type == 'out':
+        # Quintic ease-out
+        t = 1 - t
+        return 1 - (t * t * t * t * t)
+    else:  # 'in-out'
+        # Smooth quintic ease-in-out
+        if t < 0.5:
+            return 16 * t * t * t * t * t
+        t = 2 * t - 2
+        return 0.5 * t * t * t * t * t + 1
+
+def create_zoom_effect(image_path, output_path, duration, effect_duration, fps, effect_type="in"):
+    image = cv2.imread(image_path)
+    if image is None:
+        raise FileNotFoundError(f"Image not found: {image_path}")
+
+    height, width, _ = image.shape
+    output_size = (width, height)
+    total_frames = int(duration * fps)
+    effect_frames = int(effect_duration * fps)
+    blurred_background = cv2.GaussianBlur(image, (25, 25), 50)
+    new_scale = 0.7
+    new_width = int(width * new_scale)
+    new_height = int(height * new_scale)
+    new_image = cv2.resize(image, (new_width, new_height))
+    if effect_type == "in":
+        start_scale, end_scale = 0.5, 1.0  # Zoom In từ 70% -> 100%
+    elif effect_type == "out":
+        start_scale, end_scale = 1.3, 1.0  # Zoom Out từ 120% -> 100%
+    else:
+        raise ValueError("effect_type must be 'in' or 'out'")
+
+    def create_frame(scale):
+        scaled_width = int(new_width * scale)
+        scaled_height = int(new_height * scale)
+        resized = cv2.resize(new_image, (scaled_width, scaled_height))
+
+        frame = blurred_background.copy()
+        x_start = (width - scaled_width) // 2
+        y_start = (height - scaled_height) // 2
+        x_end = x_start + scaled_width
+        y_end = y_start + scaled_height
+        frame[y_start:y_end, x_start:x_end] = resized
+        return frame
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video_writer = cv2.VideoWriter(output_path, fourcc, fps, output_size)
+    for frame_idx in range(effect_frames):
+        t = cubic_ease(frame_idx / effect_frames)
+        scale = start_scale + t * (end_scale - start_scale)
+        frame = create_frame(scale)
+        video_writer.write(frame)
+    last_frame = create_frame(end_scale)
+    for _ in range(total_frames - effect_frames):
+        video_writer.write(last_frame)
+
+    video_writer.release()
+
 # Hàm tạo video mới từ các khung hình và giữ âm thanh gốc với hiệu ứng chuyển cảnh
 def create_video_with_transitions(frame_dir, interval, audio_path, output_video, ffmpeg_bin, video_key):
     try:
-        animations = ["movedown", "moveup"]
+        animations = ["movedown", "moveup", "zoomin", "zoomout"]
         
         images = sorted([os.path.join(frame_dir, f) for f in os.listdir(frame_dir) if f.endswith(".png")])
         
@@ -79,39 +142,72 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
         images = processed_images
         if len(images) < 1:
             raise Exception("Cần ít nhất 1 ảnh để tạo video.")
+        def process_video(images, lock, current_index, temp_videos, frame_dir, interval, ffmpeg_bin, animations):
+            while True:
+                with lock:
+                    if current_index[0] >= len(images):
+                        break
+                    i = current_index[0]
+                    current_index[0] += 1
+                    
+                image = images[i]
+                temp_video = os.path.join(frame_dir, f"temp_{i}.mp4")
+                animation = animations[int(time.time()) % len(animations)]
+                
+                filter_complex = [
+                    "[0:v]format=yuv420p,split=2[bg][fg]",
+                    "[bg]scale=1920:1080,boxblur=20:20[blurred]"
+                ]
+                if animation == "movedown":
+                    filter_complex.append("[fg]scale=1280:720[fg1]")
+                    filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),0-h+t*180,180)'[v]")
+                elif animation == "moveup":
+                    filter_complex.append("[fg]scale=1280:720[fg1]")
+                    filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),1080-t*180,180)'[v]")
+                elif animation == "zoomin":
+                    create_zoom_effect(image, temp_video, interval, 5, 120, "in")
+                elif animation == "zoomout":
+                    create_zoom_effect(image, temp_video, interval, 5, 120, "out")
+
+
+                command = [
+                    os.path.join(ffmpeg_bin, 'ffmpeg'),
+                    '-y',
+                    '-loop', '1',
+                    '-t', str(interval),
+                    '-i', image,
+                    '-filter_complex', ';'.join(filter_complex),
+                    '-map', '[v]',
+                    '-c:v', 'libx264',
+                    temp_video
+                ]
+                
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                output, error = process.communicate()
+                open("log.txt", "a").write(f"Output: {output}\nError: {error}\n")
+                print(f"Processed image: {image}")
+                
+                with lock:
+                    temp_videos.append(temp_video)
+
+        # Main processing
+        lock = threading.Lock()
+        current_index = [0]  # Using list to make it mutable
+        threads = []
         temp_videos = []
-        
-        for i, image in enumerate(images):
-            temp_video = os.path.join(frame_dir, f"temp_{i}.mp4")
-            animation = animations[int(int(time.time()) % len(animations))]
-            
-            filter_complex = []
-            filter_complex = [
-                "[0:v]format=yuv420p,split=2[bg][fg]",
-                "[bg]scale=1920:1080,boxblur=20:20[blurred]"
-            ]
-            if animation == "movedown":
-                filter_complex.append("[fg]scale=1280:720[fg1]")
-                filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),0-h+t*180,180)'[v]")
-            elif animation == "moveup":
-                filter_complex.append("[fg]scale=1280:720[fg1]")
-                filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),1080-t*180,180)'[v]")
 
-            command = [
-                os.path.join(ffmpeg_bin, 'ffmpeg.exe'),
-                '-y',
-                '-loop', '1',
-                '-t', str(interval),
-                '-i', image,
-                '-filter_complex', ';'.join(filter_complex),
-                '-map', '[v]',
-                '-c:v', 'libx264',
-                temp_video
-            ]
+        # Start workers
+        num_threads = min(50, len(images))
+        for _ in range(num_threads):
+            t = threading.Thread(target=process_video, 
+                                args=(images, lock, current_index, temp_videos,
+                                    frame_dir, interval, ffmpeg_bin, animations))
+            threads.append(t)
+            t.start()
 
-            subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-
-            temp_videos.append(temp_video)
+        # Wait for completion 
+        for t in threads:
+            t.join()
 
         # Kiểm tra file tạm thời và tạo concat_list.txt
         concat_list_file = os.path.join(frame_dir, "concat_list.txt")
@@ -121,7 +217,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
 
         # Lệnh FFmpeg để ghép nối video cuối cùng
         final_command = [
-            os.path.join(ffmpeg_bin, 'ffmpeg.exe'),
+            os.path.join(ffmpeg_bin, 'ffmpeg'),
             '-y',
             '-f', 'concat', '-safe', '0', '-i', concat_list_file,
             '-i', audio_path,
@@ -129,7 +225,7 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
             output_video
         ]
 
-        subprocess.Popen(final_command, creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        subprocess.Popen(final_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
     except Exception as e:
         tb = e.__traceback__
         error_message = f"Exception: {e} | "
