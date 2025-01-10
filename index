@@ -45,68 +45,118 @@ def process_video(video_path, interval, ffmpeg_bin):
     except Exception as e:
         messagebox.showerror("Error", f"Lỗi khi xử lý video: {e}")
 
-def cubic_ease(t, ease_type='in-out'):
-    t = np.clip(t, 0.0, 1.0)
+def smooth_ease_in(x, p=1.5):
+    # Easing bắt đầu nhanh hơn và chậm dần
+    return 1 - (1 - x) ** p
 
-    if ease_type == 'in':
-        # Quintic ease-in
-        return t * t * t * t * t
-    elif ease_type == 'out':
-        # Quintic ease-out
-        t = 1 - t
-        return 1 - (t * t * t * t * t)
-    else:  # 'in-out'
-        # Smooth quintic ease-in-out
-        if t < 0.5:
-            return 16 * t * t * t * t * t
-        t = 2 * t - 2
-        return 0.5 * t * t * t * t * t + 1
-
-def create_zoom_effect(image_path, output_path, duration, effect_duration, fps, effect_type="in"):
-    image = cv2.imread(image_path)
-    if image is None:
-        raise FileNotFoundError(f"Image not found: {image_path}")
-
-    height, width, _ = image.shape
-    output_size = (width, height)
-    total_frames = int(duration * fps)
-    effect_frames = int(effect_duration * fps)
-    blurred_background = cv2.GaussianBlur(image, (25, 25), 50)
-    new_scale = 0.7
-    new_width = int(width * new_scale)
-    new_height = int(height * new_scale)
-    new_image = cv2.resize(image, (new_width, new_height))
-    if effect_type == "in":
-        start_scale, end_scale = 0.5, 1.0  # Zoom In từ 70% -> 100%
-    elif effect_type == "out":
-        start_scale, end_scale = 1.3, 1.0  # Zoom Out từ 120% -> 100%
-    else:
-        raise ValueError("effect_type must be 'in' or 'out'")
-
-    def create_frame(scale):
-        scaled_width = int(new_width * scale)
-        scaled_height = int(new_height * scale)
-        resized = cv2.resize(new_image, (scaled_width, scaled_height))
-
-        frame = blurred_background.copy()
-        x_start = (width - scaled_width) // 2
-        y_start = (height - scaled_height) // 2
-        x_end = x_start + scaled_width
-        y_end = y_start + scaled_height
-        frame[y_start:y_end, x_start:x_end] = resized
-        return frame
+def create_zoomin_video(image_path, output_path, duration=5, fps=120):
+    img = cv2.imread(image_path)
+    height, width = img.shape[:2]
+    
+    # Tạo nền mờ
+    background = cv2.GaussianBlur(img, (31, 31), 0)
+    
+    scale = 0.3  # Tỷ lệ thu nhỏ ban đầu
+    small_width = int(width * scale)
+    small_height = int(height * scale)
+    small_img = cv2.resize(img, (small_width, small_height))
+    
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video_writer = cv2.VideoWriter(output_path, fourcc, fps, output_size)
-    for frame_idx in range(effect_frames):
-        t = cubic_ease(frame_idx / effect_frames)
-        scale = start_scale + t * (end_scale - start_scale)
-        frame = create_frame(scale)
-        video_writer.write(frame)
-    last_frame = create_frame(end_scale)
-    for _ in range(total_frames - effect_frames):
-        video_writer.write(last_frame)
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    
+    total_frames = duration * fps
+    for frame_num in range(total_frames):
+        frame = background.copy()
+        
+        # Tính tiến trình và áp dụng easing
+        progress = frame_num / total_frames
+        eased_progress = smooth_ease_in(progress)
+        
+        # Tính tỷ lệ zoom
+        zoom = 1.0 + (2.33 * eased_progress)
+        
+        current_width = int(small_width * zoom)
+        current_height = int(small_height * zoom)
+        
+        # Giới hạn kích thước để không vượt quá khung hình
+        current_width = min(current_width, width)
+        current_height = min(current_height, height)
+        
+        # Zoom ảnh với interpolation cao cấp
+        zoomed_img = cv2.resize(small_img, (current_width, current_height), 
+                                interpolation=cv2.INTER_LANCZOS4)
+        
+        # Tính toán vị trí crop để căn giữa
+        x = (width - current_width) // 2
+        y = (height - current_height) // 2
+        
+        # Đảm bảo không bị rung bằng cách tính tọa độ mượt mà
+        x = max(0, x)
+        y = max(0, y)
+        
+        # Căn chỉnh và ghép ảnh
+        frame[y:y+current_height, x:x+current_width] = zoomed_img
+        out.write(frame)
+    
+    out.release()
 
-    video_writer.release()
+def smooth_ease_out(x, p=0.35):
+    # Easing chậm ban đầu và nhanh dần
+    return x ** p
+
+def create_zoomout_video(image_path, output_path, duration=5, fps=120):
+    img = cv2.imread(image_path)
+    height, width = img.shape[:2]
+    
+    # Tạo nền mờ
+    background = cv2.GaussianBlur(img, (31, 31), 0)
+    
+    # Tỷ lệ thu nhỏ tối thiểu và phóng to ban đầu
+    start_scale = 1.2  # 120%
+    end_scale = 0.3    # 30%
+    small_width = int(width * end_scale)
+    small_height = int(height * end_scale)
+    small_img = cv2.resize(img, (small_width, small_height))
+    
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    
+    total_frames = duration * fps
+    for frame_num in range(total_frames):
+        frame = background.copy()
+        
+        # Tính tiến trình và áp dụng easing
+        progress = frame_num / total_frames
+        eased_progress = smooth_ease_out(progress)
+        
+        # Tính tỷ lệ zoom giảm dần từ 120% về 30%
+        zoom = start_scale - (start_scale - end_scale) * eased_progress
+        
+        current_width = int(width * zoom)
+        current_height = int(height * zoom)
+        
+        # Giới hạn kích thước để không vượt quá khung hình
+        current_width = min(current_width, width)
+        current_height = min(current_height, height)
+        
+        # Zoom ảnh với interpolation cao cấp
+        zoomed_img = cv2.resize(img, (current_width, current_height), 
+                                interpolation=cv2.INTER_LANCZOS4)
+        
+        # Tính toán vị trí crop để căn giữa
+        x = (width - current_width) // 2
+        y = (height - current_height) // 2
+        
+        # Đảm bảo không bị rung bằng cách tính tọa độ mượt mà
+        x = max(0, x)
+        y = max(0, y)
+        
+        # Căn chỉnh và ghép ảnh
+        frame[y:y+current_height, x:x+current_width] = zoomed_img
+        out.write(frame)
+    
+    out.release()
+
 
 # Hàm tạo video mới từ các khung hình và giữ âm thanh gốc với hiệu ứng chuyển cảnh
 def create_video_with_transitions(frame_dir, interval, audio_path, output_video, ffmpeg_bin, video_key):
@@ -165,9 +215,9 @@ def create_video_with_transitions(frame_dir, interval, audio_path, output_video,
                     filter_complex.append("[fg]scale=1280:720[fg1]")
                     filter_complex.append("[blurred][fg1]overlay=(W-w)/2:'if(between(t,0,5),1080-t*180,180)'[v]")
                 elif animation == "zoomin":
-                    create_zoom_effect(image, temp_video, interval, 5, 120, "in")
+                    create_zoomin_video(image, temp_video, interval)
                 elif animation == "zoomout":
-                    create_zoom_effect(image, temp_video, interval, 5, 120, "out")
+                    create_zoomout_video(image, temp_video, interval)
 
 
                 command = [
